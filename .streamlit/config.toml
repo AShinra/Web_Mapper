@@ -7,3 +7,11 @@ font = "sans serif"
 
 [client]
 showErrorDetails = true
+maxMessageSize = 200
+
+[server]
+enableXsrfProtection = true
+runOnSave = true
+
+[logger]
+level = "info"
