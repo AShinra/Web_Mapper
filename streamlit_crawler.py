@@ -2,271 +2,104 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
-import re
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(page_title="Website Crawler", layout="wide")
-st.title("🕷️ Website Crawler - Subdomain & URL Finder")
+st.title("🕷️ Website Crawler")
 
-st.sidebar.write("### Settings")
-max_pages = st.sidebar.slider("Max pages to crawl", 10, 500, 50)
-timeout_sec = st.sidebar.slider("Timeout (seconds)", 5, 60, 30)
-include_external = st.sidebar.checkbox("Include external links", False)
-max_workers = st.sidebar.slider("Concurrent requests", 1, 10, 3)
+max_pages = st.sidebar.slider("Max pages", 10, 200, 50)
+timeout = st.sidebar.slider("Timeout (sec)", 5, 60, 30)
 
-
-def extract_domain(url):
-    """Extract base domain from URL."""
+def get_domain(url):
     try:
-        parsed = urlparse(url)
-        return parsed.netloc.lower()
+        return urlparse(url).netloc.lower()
     except:
         return None
 
-
-def extract_subdomains(urls, base_domain):
-    """Extract all unique subdomains from a list of URLs."""
+def get_subdomains(urls, base_domain):
     subdomains = set()
-    base_domain_lower = base_domain.lower()
-    
     for url in urls:
-        try:
-            domain = extract_domain(url)
-            if domain and domain.endswith(base_domain_lower) and domain != base_domain_lower:
-                subdomains.add(domain)
-        except:
-            pass
-    
+        domain = get_domain(url)
+        if domain and domain.endswith(base_domain) and domain != base_domain:
+            subdomains.add(domain)
     return sorted(list(subdomains))
 
-
-def is_valid_url(url, base_domain):
-    """Check if URL belongs to the same domain or subdomain."""
+def fetch_links(url, timeout):
     try:
-        domain = extract_domain(url)
-        if not domain:
-            return False
-        base_lower = base_domain.lower()
-        return domain == base_lower or domain.endswith("." + base_lower)
-    except:
-        return False
-
-
-def fetch_page(url, timeout_sec):
-    """Fetch a single page and extract links."""
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        response = requests.get(url, timeout=timeout_sec, headers=headers, allow_redirects=True)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.content, 'html.parser')
-        links = []
-        
-        for link in soup.find_all('a', href=True):
-            href = link['href'].strip()
-            if href and not href.startswith('#'):
-                absolute_url = urljoin(url, href)
-                links.append(absolute_url)
-        
-        return links, None
-    except requests.exceptions.Timeout:
-        return [], f"Timeout: {url[:60]}"
-    except requests.exceptions.ConnectionError:
-        return [], f"Connection error: {url[:60]}"
+        resp = requests.get(url, timeout=timeout, headers={'User-Agent': 'Mozilla/5.0'})
+        soup = BeautifulSoup(resp.content, 'html.parser')
+        links = [urljoin(url, a.get('href')) for a in soup.find_all('a', href=True)]
+        return [l for l in links if l and not l.startswith('#')], None
     except Exception as e:
-        return [], f"Error on {url[:60]}: {str(e)[:50]}"
+        return [], str(e)[:50]
 
-
-def crawl_website(start_url, max_pages, timeout_sec, include_external, max_workers):
-    """Crawl website and collect all URLs and subdomains."""
-    visited_urls = set()
+def crawl(start_url, max_pages, timeout, workers=3):
+    if not start_url.startswith(('http://', 'https://')):
+        start_url = 'https://' + start_url
+    
+    base_domain = get_domain(start_url)
+    visited = set()
     all_urls = set()
-    subdomains = set()
     errors = []
-    
-    base_domain = extract_domain(start_url)
-    if not base_domain:
-        return {
-            "visited_urls": [],
-            "all_urls": [],
-            "subdomains": [],
-            "base_domain": "invalid",
-            "errors": ["Invalid URL"]
-        }
-    
-    status_placeholder = st.empty()
-    progress_bar = st.progress(0)
-    
-    # Normalize start URL
-    if not start_url.startswith(("http://", "https://")):
-        start_url = "https://" + start_url
-    
     queue = [start_url]
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    status = st.empty()
+    progress = st.progress(0)
+    
+    with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {}
         
-        while queue and len(visited_urls) < max_pages:
-            # Submit new tasks
-            while queue and len(futures) < max_workers and len(visited_urls) < max_pages:
-                current_url = queue.pop(0)
-                
-                if current_url in visited_urls:
-                    continue
-                
-                visited_urls.add(current_url)
-                future = executor.submit(fetch_page, current_url, timeout_sec)
-                futures[future] = current_url
+        while queue and len(visited) < max_pages:
+            while queue and len(futures) < workers and len(visited) < max_pages:
+                url = queue.pop(0)
+                if url not in visited:
+                    visited.add(url)
+                    futures[executor.submit(fetch_links, url, timeout)] = url
             
-            # Process completed tasks
             for future in as_completed(futures):
                 url = futures.pop(future)
-                
-                progress = len(visited_urls) / max_pages
-                progress_bar.progress(min(progress, 1.0))
-                status_placeholder.info(f"🔍 Crawling ({len(visited_urls)}/{max_pages}): {url[:60]}...")
+                status.info(f"🔍 Crawled: {len(visited)}/{max_pages} - {url[:50]}")
+                progress.progress(len(visited) / max_pages)
                 
                 try:
-                    links, error = future.result()
-                    
-                    if error:
-                        errors.append(error)
+                    links, err = future.result()
+                    if err:
+                        errors.append(err)
                     
                     for link in links:
-                        try:
-                            parsed = urlparse(link)
-                            
-                            if not parsed.scheme:
-                                continue
-                            
-                            link_domain = extract_domain(link)
-                            
-                            if include_external or is_valid_url(link, base_domain):
-                                all_urls.add(link)
-                                
-                                if is_valid_url(link, base_domain):
-                                    # Track subdomains
-                                    if link_domain and link_domain.endswith("." + base_domain.lower()):
-                                        subdomains.add(link_domain)
-                                    
-                                    if link not in visited_urls and len(visited_urls) < max_pages:
-                                        queue.append(link)
-                        except Exception as e:
-                            continue
-                
-                except Exception as e:
-                    errors.append(f"Error processing {url}: {str(e)[:50]}")
+                        domain = get_domain(link)
+                        if domain and (domain == base_domain or domain.endswith('.' + base_domain)):
+                            all_urls.add(link)
+                            if link not in visited and len(visited) < max_pages:
+                                queue.append(link)
+                except:
+                    pass
     
-    return {
-        "visited_urls": sorted(list(visited_urls)),
-        "all_urls": sorted(list(all_urls)),
-        "subdomains": sorted(list(subdomains)) if subdomains else sorted(list(extract_subdomains(all_urls, base_domain))),
-        "base_domain": base_domain,
-        "errors": errors
-    }
+    return visited, all_urls, get_subdomains(all_urls, base_domain), errors
 
-
-# Main UI
 col1, col2 = st.columns([3, 1])
-
 with col1:
-    website_url = st.text_input(
-        "Enter website URL",
-        placeholder="example.com or https://example.com",
-        help="Enter the website you want to crawl"
-    )
-
+    url_input = st.text_input("Website URL", placeholder="example.com")
 with col2:
-    start_button = st.button("🚀 Start Crawling", use_container_width=True, type="primary")
-
-if start_button and website_url:
-    try:
-        # Validate URL
-        if not website_url.startswith(("http://", "https://")):
-            test_url = "https://" + website_url
-        else:
-            test_url = website_url
-        
-        urlparse(test_url)
-        
-        st.divider()
-        
-        with st.spinner("🔄 Crawling website... This may take a moment."):
-            results = crawl_website(
-                test_url,
-                max_pages,
-                timeout_sec,
-                include_external,
-                max_workers
-            )
-        
-        # Display Results
-        st.success("✅ Crawling completed!")
-        
-        # Summary cards
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Base Domain", results["base_domain"])
-        with col2:
-            st.metric("Pages Crawled", len(results["visited_urls"]))
-        with col3:
-            st.metric("Total URLs Found", len(results["all_urls"]))
-        with col4:
-            st.metric("Subdomains Found", len(results["subdomains"]))
-        
-        st.divider()
-        
-        # Display subdomains
-        if results["subdomains"]:
-            st.subheader("🌐 Discovered Subdomains")
-            with st.expander(f"View {len(results['subdomains'])} subdomains", expanded=True):
-                for i, subdomain in enumerate(results["subdomains"], 1):
-                    st.write(f"{i}. `{subdomain}`")
-                
-                # Download subdomains
-                subdomains_text = "\n".join(results["subdomains"])
-                st.download_button(
-                    label="📥 Download Subdomains (TXT)",
-                    data=subdomains_text,
-                    file_name=f"{results['base_domain']}_subdomains.txt",
-                    mime="text/plain"
-                )
-        else:
-            st.info("No subdomains found (website may only use main domain)")
-        
-        st.divider()
-        
-        # Display all URLs
-        st.subheader("🔗 All URLs Found")
-        with st.expander(f"View {len(results['all_urls'])} URLs", expanded=False):
-            urls_text = "\n".join(results["all_urls"])
-            st.text_area(
-                "All discovered URLs:",
-                urls_text,
-                height=300,
-                disabled=True
-            )
-            
-            # Download URLs
-            st.download_button(
-                label="📥 Download All URLs (TXT)",
-                data=urls_text,
-                file_name=f"{results['base_domain']}_urls.txt",
-                mime="text/plain"
-            )
-        
-        # Display errors
-        if results["errors"]:
+    if st.button("🚀 Crawl", use_container_width=True, type="primary"):
+        if url_input:
             st.divider()
-            with st.expander("⚠️ Errors & Warnings", expanded=False):
-                for error in results["errors"][:10]:  # Show first 10 errors
-                    st.warning(error)
-    
-    except Exception as e:
-        st.error(f"❌ Invalid URL or error: {str(e)}")
-
-st.divider()
-st.caption("💡 Tips: Use low max pages for faster results. Increase timeout for slow websites.")
+            visited, all_urls, subdomains, errors = crawl(url_input, max_pages, timeout)
+            
+            st.success("✅ Done!")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Pages", len(visited))
+            col2.metric("URLs", len(all_urls))
+            col3.metric("Subdomains", len(subdomains))
+            
+            st.divider()
+            if subdomains:
+                st.subheader("Subdomains")
+                for sd in subdomains:
+                    st.write(f"• `{sd}`")
+                st.download_button("📥 Download", "\n".join(subdomains), "subdomains.txt", "text/plain")
+            
+            st.divider()
+            st.subheader("All URLs")
+            st.text_area("URLs:", "\n".join(sorted(all_urls)), height=200, disabled=True)
+            st.download_button("📥 Download", "\n".join(sorted(all_urls)), "urls.txt", "text/plain")
