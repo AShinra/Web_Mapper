@@ -10,12 +10,8 @@ libxrandr2
 libxrender1
 libxss1
 libxtst6
-fonts-liberation
-libgtk-3-0
-xdg-utils
 libatk1.0-0
 libatk-bridge2.0-0
-libcups2
 libdrm2
 libgbm1
 libnss3
@@ -33,4 +29,4 @@ libxcb-xinerama0
 libxcb-xkb1
 libxkbcommon-x11-0
 fonts-dejavu
-fonts-liberation2
+fonts-liberation
