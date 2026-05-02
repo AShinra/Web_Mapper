@@ -166,32 +166,33 @@ if st.session_state.crawler_run:
     # Section Card
     with col1:
         st.markdown("### 📄 Section")
+        section_filter = st.text_input("Filter", key="section_filter", placeholder="🔍 Filter URLs...", label_visibility="collapsed")
+        section_options = [u for u in urls_list if section_filter.lower() in u.lower()] if section_filter else urls_list
         section_urls = st.multiselect(
             "Select URLs for Section",
-            urls_list,
+            section_options,
             key="section_urls",
             label_visibility="collapsed"
         )
-        
+
         if section_urls:
             if st.button("🔧 Generate Regex", key="section_regex_btn", use_container_width=True):
                 regex = generate_regex(section_urls)
-                if regex:
+                if regex and regex not in st.session_state.section_regexes:
                     st.session_state.section_regexes.append(regex)
-        
-        # Manual regex input
-        manual_section = st.text_input("Add custom regex", key="manual_section", placeholder="e.g., (pattern1|pattern2)")
-        if manual_section and st.button("➕ Add", key="add_section", use_container_width=True):
-            st.session_state.section_regexes.append(manual_section)
-            st.success("✅ Regex added!")
-        
-        # Display regexes
+
+        with st.form("form_section", clear_on_submit=True):
+            manual_section = st.text_input("Add custom regex", placeholder="e.g., (pattern1|pattern2)")
+            if st.form_submit_button("➕ Add", use_container_width=True) and manual_section:
+                if manual_section not in st.session_state.section_regexes:
+                    st.session_state.section_regexes.append(manual_section)
+
         if st.session_state.section_regexes:
             st.markdown("**Regex Results:**")
             for i, regex in enumerate(st.session_state.section_regexes):
                 col_reg, col_del = st.columns([4, 1])
                 with col_reg:
-                    st.code(regex, language="regex")
+                    st.code(regex, language="text")
                 with col_del:
                     if st.button("🗑️", key=f"del_section_{i}", use_container_width=True):
                         st.session_state.section_regexes.pop(i)
@@ -200,32 +201,33 @@ if st.session_state.crawler_run:
     # Article Card
     with col2:
         st.markdown("### 📰 Article")
+        article_filter = st.text_input("Filter", key="article_filter", placeholder="🔍 Filter URLs...", label_visibility="collapsed")
+        article_options = [u for u in urls_list if article_filter.lower() in u.lower()] if article_filter else urls_list
         article_urls = st.multiselect(
             "Select URLs for Article",
-            urls_list,
+            article_options,
             key="article_urls",
             label_visibility="collapsed"
         )
-        
+
         if article_urls:
             if st.button("🔧 Generate Regex", key="article_regex_btn", use_container_width=True):
                 regex = generate_regex(article_urls)
-                if regex:
+                if regex and regex not in st.session_state.article_regexes:
                     st.session_state.article_regexes.append(regex)
-        
-        # Manual regex input
-        manual_article = st.text_input("Add custom regex", key="manual_article", placeholder="e.g., (pattern1|pattern2)")
-        if manual_article and st.button("➕ Add", key="add_article", use_container_width=True):
-            st.session_state.article_regexes.append(manual_article)
-            st.success("✅ Regex added!")
-        
-        # Display regexes
+
+        with st.form("form_article", clear_on_submit=True):
+            manual_article = st.text_input("Add custom regex", placeholder="e.g., (pattern1|pattern2)")
+            if st.form_submit_button("➕ Add", use_container_width=True) and manual_article:
+                if manual_article not in st.session_state.article_regexes:
+                    st.session_state.article_regexes.append(manual_article)
+
         if st.session_state.article_regexes:
             st.markdown("**Regex Results:**")
             for i, regex in enumerate(st.session_state.article_regexes):
                 col_reg, col_del = st.columns([4, 1])
                 with col_reg:
-                    st.code(regex, language="regex")
+                    st.code(regex, language="text")
                 with col_del:
                     if st.button("🗑️", key=f"del_article_{i}", use_container_width=True):
                         st.session_state.article_regexes.pop(i)
@@ -234,32 +236,33 @@ if st.session_state.crawler_run:
     # Ignore Card
     with col3:
         st.markdown("### 🚫 Ignore")
+        ignore_filter = st.text_input("Filter", key="ignore_filter", placeholder="🔍 Filter URLs...", label_visibility="collapsed")
+        ignore_options = [u for u in urls_list if ignore_filter.lower() in u.lower()] if ignore_filter else urls_list
         ignore_urls = st.multiselect(
             "Select URLs for Ignore",
-            urls_list,
+            ignore_options,
             key="ignore_urls",
             label_visibility="collapsed"
         )
-        
+
         if ignore_urls:
             if st.button("🔧 Generate Regex", key="ignore_regex_btn", use_container_width=True):
                 regex = generate_regex(ignore_urls)
-                if regex:
+                if regex and regex not in st.session_state.ignore_regexes:
                     st.session_state.ignore_regexes.append(regex)
-        
-        # Manual regex input
-        manual_ignore = st.text_input("Add custom regex", key="manual_ignore", placeholder="e.g., (pattern1|pattern2)")
-        if manual_ignore and st.button("➕ Add", key="add_ignore", use_container_width=True):
-            st.session_state.ignore_regexes.append(manual_ignore)
-            st.success("✅ Regex added!")
-        
-        # Display regexes
+
+        with st.form("form_ignore", clear_on_submit=True):
+            manual_ignore = st.text_input("Add custom regex", placeholder="e.g., (pattern1|pattern2)")
+            if st.form_submit_button("➕ Add", use_container_width=True) and manual_ignore:
+                if manual_ignore not in st.session_state.ignore_regexes:
+                    st.session_state.ignore_regexes.append(manual_ignore)
+
         if st.session_state.ignore_regexes:
             st.markdown("**Regex Results:**")
             for i, regex in enumerate(st.session_state.ignore_regexes):
                 col_reg, col_del = st.columns([4, 1])
                 with col_reg:
-                    st.code(regex, language="regex")
+                    st.code(regex, language="text")
                 with col_del:
                     if st.button("🗑️", key=f"del_ignore_{i}", use_container_width=True):
                         st.session_state.ignore_regexes.pop(i)
