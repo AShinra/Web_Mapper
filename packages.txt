@@ -1,3 +1,5 @@
+build-essential
+python3-dev
 libx11-xcb1
 libxcomposite1
 libxcursor1
