@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 st.set_page_config(page_title="Website Crawler", layout="wide")
 st.title("🕷️ Website Crawler")
@@ -79,27 +80,66 @@ def crawl(start_url, max_pages, timeout, workers=3):
 
 col1, col2 = st.columns([3, 1])
 with col1:
-    url_input = st.text_input("Website URL", placeholder="example.com")
+    url_input = st.text_input("Website URL", placeholder="example.com", key="url_input")
 with col2:
     if st.button("🚀 Crawl", use_container_width=True, type="primary"):
         if url_input:
-            st.divider()
-            visited, all_urls, subdomains, errors = crawl(url_input, max_pages, timeout)
+            st.session_state.visited, st.session_state.all_urls, st.session_state.subdomains, st.session_state.errors = crawl(url_input, max_pages, timeout)
+            st.session_state.crawler_run = True
+
+if 'crawler_run' in st.session_state and st.session_state.crawler_run:
+    st.divider()
+    
+    # Summary
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Pages", len(st.session_state.visited))
+    col2.metric("URLs", len(st.session_state.all_urls))
+    col3.metric("Subdomains", len(st.session_state.subdomains))
+    
+    st.divider()
+    
+    # Subdomains with toggles
+    if st.session_state.subdomains:
+        st.subheader("🌐 Subdomains")
+        
+        # Initialize session state for toggles
+        for sd in st.session_state.subdomains:
+            if sd not in st.session_state:
+                st.session_state[sd] = True
+        
+        # Display subdomains with toggles
+        for sd in st.session_state.subdomains:
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.write(f"• `{sd}`")
+            with col2:
+                st.session_state[sd] = st.toggle("Active", value=st.session_state[sd], key=f"toggle_{sd}")
+        
+        st.divider()
+        
+        # Save button
+        if st.button("💾 Save Active Subdomains", use_container_width=True, type="primary"):
+            active = [sd for sd in st.session_state.subdomains if st.session_state.get(sd, True)]
             
-            st.success("✅ Done!")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Pages", len(visited))
-            col2.metric("URLs", len(all_urls))
-            col3.metric("Subdomains", len(subdomains))
-            
-            st.divider()
-            if subdomains:
-                st.subheader("Subdomains")
-                for sd in subdomains:
-                    st.write(f"• `{sd}`")
-                st.download_button("📥 Download", "\n".join(subdomains), "subdomains.txt", "text/plain")
-            
-            st.divider()
-            st.subheader("All URLs")
-            st.text_area("URLs:", "\n".join(sorted(all_urls)), height=200, disabled=True)
-            st.download_button("📥 Download", "\n".join(sorted(all_urls)), "urls.txt", "text/plain")
+            if active:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"subdomains_{timestamp}.txt"
+                content = "\n".join(active)
+                
+                st.success(f"✅ {len(active)} subdomains ready to download!")
+                st.download_button("📥 Download Active Subdomains", content, filename, "text/plain", use_container_width=True)
+                
+                # Display saved content
+                with st.expander("View saved content", expanded=False):
+                    st.text_area("Saved subdomains:", content, height=200, disabled=True)
+            else:
+                st.warning("⚠️ No active subdomains selected!")
+    
+    st.divider()
+    
+    # All URLs
+    st.subheader("🔗 All URLs")
+    with st.expander(f"View {len(st.session_state.all_urls)} URLs"):
+        urls_content = "\n".join(sorted(st.session_state.all_urls))
+        st.text_area("URLs:", urls_content, height=200, disabled=True)
+        st.download_button("📥 Download URLs", urls_content, "urls.txt", "text/plain", use_container_width=True)
