@@ -1,4 +1,5 @@
 build-essential
+python3.11-dev
 python3-dev
 libx11-xcb1
 libxcomposite1
@@ -32,3 +33,11 @@ libxcb-xkb1
 libxkbcommon-x11-0
 fonts-dejavu
 fonts-liberation
+libjpeg-turbo-progs
+libjpeg62-turbo
+libpng16-16
+zlib1g
+libfreetype6
+libtiff6
+libwebp7
+liblcms2-2
