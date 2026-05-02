@@ -24,10 +24,6 @@ libpangocairo-1.0-0
 libxcb-dri3-0
 libxkbcommon0
 libxshmfence1
-libavcodec59
-libavformat59
-libavutil57
-libswscale6
 libxcb-image0
 libxcb-keysyms1
 libxcb-randr0
@@ -38,4 +34,3 @@ libxcb-xkb1
 libxkbcommon-x11-0
 fonts-dejavu
 fonts-liberation2
-gsfonts
