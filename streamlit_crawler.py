@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+import re
 
 st.set_page_config(page_title="Website Crawler", layout="wide")
 st.title("🕷️ Website Crawler")
@@ -78,6 +79,34 @@ def crawl(start_url, max_pages, timeout, workers=3):
     
     return visited, all_urls, get_subdomains(all_urls, base_domain), errors
 
+def generate_regex(urls):
+    """Generate regex pattern from selected URLs"""
+    if not urls:
+        return ""
+    
+    patterns = []
+    for url in urls:
+        parsed = urlparse(url)
+        path = parsed.path
+        if path:
+            patterns.append(re.escape(path))
+    
+    if patterns:
+        combined = "|".join(patterns)
+        return f"({combined})"
+    return ""
+
+# Initialize session state
+if 'crawler_run' not in st.session_state:
+    st.session_state.crawler_run = False
+if 'section_regexes' not in st.session_state:
+    st.session_state.section_regexes = []
+if 'article_regexes' not in st.session_state:
+    st.session_state.article_regexes = []
+if 'ignore_regexes' not in st.session_state:
+    st.session_state.ignore_regexes = []
+
+# Input section
 col1, col2 = st.columns([3, 1])
 with col1:
     url_input = st.text_input("Website URL", placeholder="example.com", key="url_input")
@@ -87,7 +116,7 @@ with col2:
             st.session_state.visited, st.session_state.all_urls, st.session_state.subdomains, st.session_state.errors = crawl(url_input, max_pages, timeout)
             st.session_state.crawler_run = True
 
-if 'crawler_run' in st.session_state and st.session_state.crawler_run:
+if st.session_state.crawler_run:
     st.divider()
     
     # Summary
@@ -102,12 +131,10 @@ if 'crawler_run' in st.session_state and st.session_state.crawler_run:
     if st.session_state.subdomains:
         st.subheader("🌐 Subdomains")
         
-        # Initialize session state for toggles
         for sd in st.session_state.subdomains:
             if sd not in st.session_state:
                 st.session_state[sd] = True
         
-        # Display subdomains with toggles
         for sd in st.session_state.subdomains:
             col1, col2 = st.columns([4, 1])
             with col1:
@@ -117,23 +144,149 @@ if 'crawler_run' in st.session_state and st.session_state.crawler_run:
         
         st.divider()
         
-        # Save button
-        if st.button("💾 Save Active Subdomains", use_container_width=True, type="primary"):
+        # Save subdomains button
+        if st.button("💾 Save Active Subdomains", use_container_width=True):
             active = [sd for sd in st.session_state.subdomains if st.session_state.get(sd, True)]
-            
             if active:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"subdomains_{timestamp}.txt"
                 content = "\n".join(active)
-                
-                st.success(f"✅ {len(active)} subdomains ready to download!")
-                st.download_button("📥 Download Active Subdomains", content, filename, "text/plain", use_container_width=True)
-                
-                # Display saved content
-                with st.expander("View saved content", expanded=False):
-                    st.text_area("Saved subdomains:", content, height=200, disabled=True)
-            else:
-                st.warning("⚠️ No active subdomains selected!")
+                st.success(f"✅ {len(active)} subdomains ready!")
+                st.download_button("📥 Download", content, filename, "text/plain", use_container_width=True)
+    
+    st.divider()
+    
+    # URL Categorization
+    st.subheader("📂 Categorize URLs")
+    
+    urls_list = sorted(list(st.session_state.all_urls))
+    
+    col1, col2, col3 = st.columns(3)
+    
+    # Section Card
+    with col1:
+        st.markdown("### 📄 Section")
+        section_urls = st.multiselect(
+            "Select URLs for Section",
+            urls_list,
+            key="section_urls",
+            label_visibility="collapsed"
+        )
+        
+        if section_urls:
+            if st.button("🔧 Generate Regex", key="section_regex_btn", use_container_width=True):
+                regex = generate_regex(section_urls)
+                if regex:
+                    st.session_state.section_regexes.append(regex)
+        
+        # Manual regex input
+        manual_section = st.text_input("Add custom regex", key="manual_section", placeholder="e.g., (pattern1|pattern2)")
+        if manual_section and st.button("➕ Add", key="add_section", use_container_width=True):
+            st.session_state.section_regexes.append(manual_section)
+            st.success("✅ Regex added!")
+        
+        # Display regexes
+        if st.session_state.section_regexes:
+            st.markdown("**Regex Results:**")
+            for i, regex in enumerate(st.session_state.section_regexes):
+                col_reg, col_del = st.columns([4, 1])
+                with col_reg:
+                    st.code(regex, language="regex")
+                with col_del:
+                    if st.button("🗑️", key=f"del_section_{i}", use_container_width=True):
+                        st.session_state.section_regexes.pop(i)
+                        st.rerun()
+    
+    # Article Card
+    with col2:
+        st.markdown("### 📰 Article")
+        article_urls = st.multiselect(
+            "Select URLs for Article",
+            urls_list,
+            key="article_urls",
+            label_visibility="collapsed"
+        )
+        
+        if article_urls:
+            if st.button("🔧 Generate Regex", key="article_regex_btn", use_container_width=True):
+                regex = generate_regex(article_urls)
+                if regex:
+                    st.session_state.article_regexes.append(regex)
+        
+        # Manual regex input
+        manual_article = st.text_input("Add custom regex", key="manual_article", placeholder="e.g., (pattern1|pattern2)")
+        if manual_article and st.button("➕ Add", key="add_article", use_container_width=True):
+            st.session_state.article_regexes.append(manual_article)
+            st.success("✅ Regex added!")
+        
+        # Display regexes
+        if st.session_state.article_regexes:
+            st.markdown("**Regex Results:**")
+            for i, regex in enumerate(st.session_state.article_regexes):
+                col_reg, col_del = st.columns([4, 1])
+                with col_reg:
+                    st.code(regex, language="regex")
+                with col_del:
+                    if st.button("🗑️", key=f"del_article_{i}", use_container_width=True):
+                        st.session_state.article_regexes.pop(i)
+                        st.rerun()
+    
+    # Ignore Card
+    with col3:
+        st.markdown("### 🚫 Ignore")
+        ignore_urls = st.multiselect(
+            "Select URLs for Ignore",
+            urls_list,
+            key="ignore_urls",
+            label_visibility="collapsed"
+        )
+        
+        if ignore_urls:
+            if st.button("🔧 Generate Regex", key="ignore_regex_btn", use_container_width=True):
+                regex = generate_regex(ignore_urls)
+                if regex:
+                    st.session_state.ignore_regexes.append(regex)
+        
+        # Manual regex input
+        manual_ignore = st.text_input("Add custom regex", key="manual_ignore", placeholder="e.g., (pattern1|pattern2)")
+        if manual_ignore and st.button("➕ Add", key="add_ignore", use_container_width=True):
+            st.session_state.ignore_regexes.append(manual_ignore)
+            st.success("✅ Regex added!")
+        
+        # Display regexes
+        if st.session_state.ignore_regexes:
+            st.markdown("**Regex Results:**")
+            for i, regex in enumerate(st.session_state.ignore_regexes):
+                col_reg, col_del = st.columns([4, 1])
+                with col_reg:
+                    st.code(regex, language="regex")
+                with col_del:
+                    if st.button("🗑️", key=f"del_ignore_{i}", use_container_width=True):
+                        st.session_state.ignore_regexes.pop(i)
+                        st.rerun()
+    
+    st.divider()
+    
+    # Download all regexes
+    if st.session_state.section_regexes or st.session_state.article_regexes or st.session_state.ignore_regexes:
+        st.subheader("💾 Save Configuration")
+        
+        config_content = ""
+        if st.session_state.section_regexes:
+            config_content += "# SECTION\n" + "\n".join(st.session_state.section_regexes) + "\n\n"
+        if st.session_state.article_regexes:
+            config_content += "# ARTICLE\n" + "\n".join(st.session_state.article_regexes) + "\n\n"
+        if st.session_state.ignore_regexes:
+            config_content += "# IGNORE\n" + "\n".join(st.session_state.ignore_regexes) + "\n\n"
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        st.download_button(
+            "📥 Download Config",
+            config_content,
+            f"regex_config_{timestamp}.txt",
+            "text/plain",
+            use_container_width=True
+        )
     
     st.divider()
     
