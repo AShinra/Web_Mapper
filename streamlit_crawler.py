@@ -1,9 +1,10 @@
 import streamlit as st
-import asyncio
-from playwright.async_api import async_playwright
+import requests
+from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
 import re
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(page_title="Website Crawler", layout="wide")
 st.title("🕷️ Website Crawler - Subdomain & URL Finder")
@@ -12,12 +13,16 @@ st.sidebar.write("### Settings")
 max_pages = st.sidebar.slider("Max pages to crawl", 10, 500, 50)
 timeout_sec = st.sidebar.slider("Timeout (seconds)", 5, 60, 30)
 include_external = st.sidebar.checkbox("Include external links", False)
+max_workers = st.sidebar.slider("Concurrent requests", 1, 10, 3)
 
 
 def extract_domain(url):
     """Extract base domain from URL."""
-    parsed = urlparse(url)
-    return parsed.netloc.lower()
+    try:
+        parsed = urlparse(url)
+        return parsed.netloc.lower()
+    except:
+        return None
 
 
 def extract_subdomains(urls, base_domain):
@@ -28,7 +33,7 @@ def extract_subdomains(urls, base_domain):
     for url in urls:
         try:
             domain = extract_domain(url)
-            if domain.endswith(base_domain_lower) and domain != base_domain_lower:
+            if domain and domain.endswith(base_domain_lower) and domain != base_domain_lower:
                 subdomains.add(domain)
         except:
             pass
@@ -40,13 +45,42 @@ def is_valid_url(url, base_domain):
     """Check if URL belongs to the same domain or subdomain."""
     try:
         domain = extract_domain(url)
+        if not domain:
+            return False
         base_lower = base_domain.lower()
         return domain == base_lower or domain.endswith("." + base_lower)
     except:
         return False
 
 
-async def crawl_website(start_url, max_pages, timeout_sec, include_external):
+def fetch_page(url, timeout_sec):
+    """Fetch a single page and extract links."""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        response = requests.get(url, timeout=timeout_sec, headers=headers, allow_redirects=True)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        links = []
+        
+        for link in soup.find_all('a', href=True):
+            href = link['href'].strip()
+            if href and not href.startswith('#'):
+                absolute_url = urljoin(url, href)
+                links.append(absolute_url)
+        
+        return links, None
+    except requests.exceptions.Timeout:
+        return [], f"Timeout: {url[:60]}"
+    except requests.exceptions.ConnectionError:
+        return [], f"Connection error: {url[:60]}"
+    except Exception as e:
+        return [], f"Error on {url[:60]}: {str(e)[:50]}"
+
+
+def crawl_website(start_url, max_pages, timeout_sec, include_external, max_workers):
     """Crawl website and collect all URLs and subdomains."""
     visited_urls = set()
     all_urls = set()
@@ -54,72 +88,77 @@ async def crawl_website(start_url, max_pages, timeout_sec, include_external):
     errors = []
     
     base_domain = extract_domain(start_url)
+    if not base_domain:
+        return {
+            "visited_urls": [],
+            "all_urls": [],
+            "subdomains": [],
+            "base_domain": "invalid",
+            "errors": ["Invalid URL"]
+        }
+    
     status_placeholder = st.empty()
+    progress_bar = st.progress(0)
     
     # Normalize start URL
     if not start_url.startswith(("http://", "https://")):
         start_url = "https://" + start_url
     
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            await page.set_default_timeout(timeout_sec * 1000)
-            
-            queue = [start_url]
-            
-            while queue and len(visited_urls) < max_pages:
+    queue = [start_url]
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {}
+        
+        while queue and len(visited_urls) < max_pages:
+            # Submit new tasks
+            while queue and len(futures) < max_workers and len(visited_urls) < max_pages:
                 current_url = queue.pop(0)
                 
                 if current_url in visited_urls:
                     continue
                 
                 visited_urls.add(current_url)
-                status_placeholder.info(f"🔍 Crawling ({len(visited_urls)}/{max_pages}): {current_url[:60]}...")
+                future = executor.submit(fetch_page, current_url, timeout_sec)
+                futures[future] = current_url
+            
+            # Process completed tasks
+            for future in as_completed(futures):
+                url = futures.pop(future)
+                
+                progress = len(visited_urls) / max_pages
+                progress_bar.progress(min(progress, 1.0))
+                status_placeholder.info(f"🔍 Crawling ({len(visited_urls)}/{max_pages}): {url[:60]}...")
                 
                 try:
-                    await page.goto(current_url, wait_until="domcontentloaded")
+                    links, error = future.result()
                     
-                    # Extract all links
-                    links = await page.evaluate("""
-                        () => {
-                            return Array.from(document.querySelectorAll('a[href]'))
-                                .map(a => a.getAttribute('href'))
-                                .filter(href => href && !href.startsWith('#'));
-                        }
-                    """)
+                    if error:
+                        errors.append(error)
                     
                     for link in links:
                         try:
-                            absolute_url = urljoin(current_url, link)
-                            parsed = urlparse(absolute_url)
+                            parsed = urlparse(link)
                             
                             if not parsed.scheme:
                                 continue
                             
-                            # Check domain matching
-                            link_domain = extract_domain(absolute_url)
+                            link_domain = extract_domain(link)
                             
-                            if include_external or is_valid_url(absolute_url, base_domain):
-                                all_urls.add(absolute_url)
+                            if include_external or is_valid_url(link, base_domain):
+                                all_urls.add(link)
                                 
-                                if is_valid_url(absolute_url, base_domain):
+                                if is_valid_url(link, base_domain):
                                     # Track subdomains
-                                    if link_domain.endswith("." + base_domain.lower()):
+                                    if link_domain and link_domain.endswith("." + base_domain.lower()):
                                         subdomains.add(link_domain)
                                     
-                                    if absolute_url not in visited_urls and len(visited_urls) < max_pages:
-                                        queue.append(absolute_url)
+                                    if link not in visited_urls and len(visited_urls) < max_pages:
+                                        queue.append(link)
                         except Exception as e:
                             continue
                 
                 except Exception as e:
-                    errors.append(f"Error on {current_url}: {str(e)[:80]}")
-            
-            await browser.close()
-    
-    except Exception as e:
-        errors.append(f"Browser error: {str(e)}")
+                    errors.append(f"Error processing {url}: {str(e)[:50]}")
     
     return {
         "visited_urls": sorted(list(visited_urls)),
@@ -156,12 +195,13 @@ if start_button and website_url:
         st.divider()
         
         with st.spinner("🔄 Crawling website... This may take a moment."):
-            results = asyncio.run(crawl_website(
+            results = crawl_website(
                 test_url,
                 max_pages,
                 timeout_sec,
-                include_external
-            ))
+                include_external,
+                max_workers
+            )
         
         # Display Results
         st.success("✅ Crawling completed!")
